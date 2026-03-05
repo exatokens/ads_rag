@@ -1,0 +1,8 @@
+used only clip with 5 shoe images, 2 vegetables, 2 sea food. 
+1. CLIP sees "object on white background" — not "vegetable" vs "shoe". With only 9 images, the vectors have almost nothing to differentiate by, so they all cluster loosely together.
+
+there is always noise. shrimp appers as top result for search of "tomato" which is red.
+
+we should always be looking at the scores:
+The 512-dim CLIP space for 9 items will always look noisy in the UI. Don't use the visualization to validate D1 — use the search scores instead. The broccoli search scoring 0.31 vs 0.22 for shoes is the right signal.
+

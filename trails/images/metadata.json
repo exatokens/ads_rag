@@ -1,0 +1,11 @@
+[
+  {"id": "shoe_001", "metadata": {"category": "shoe", "color": "white", "brand": "Nike", "product": "Air Max 90"}},
+  {"id": "shoe_002", "metadata": {"category": "shoe", "color": "black", "brand": "Converse", "product": "Chuck Taylor All Star"}},
+  {"id": "shoe_003", "metadata": {"category": "shoe", "color": "black", "brand": "Adidas", "product": "Sneaker"}},
+  {"id": "shoe_004", "metadata": {"category": "shoe", "color": "grey", "brand": "New Balance", "product": "Running Shoe"}},
+  {"id": "shoe_005", "metadata": {"category": "shoe", "color": "white", "brand": "Puma", "product": "Sneaker"}},
+  {"id": "veg_001", "metadata": {"category": "vegetable", "color": "green", "brand": "N/A", "product": "Broccoli"}},
+  {"id": "veg_002", "metadata": {"category": "vegetable", "color": "red", "brand": "N/A", "product": "Tomato"}},
+  {"id": "sea_001", "metadata": {"category": "seafood", "color": "orange", "brand": "N/A", "product": "Salmon"}},
+  {"id": "sea_002", "metadata": {"category": "seafood", "color": "pink", "brand": "N/A", "product": "Shrimp"}}
+]
