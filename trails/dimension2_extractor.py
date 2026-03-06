@@ -1,71 +1,24 @@
 import json
 import base64
-import requests
 from pathlib import Path
-
+from ray_cluster_access.sv_inference_api import sv_openai_completion
+from ray_cluster_access.sv_ray_cluster_api import embed_text as sv_embed_text
 IMAGES_DIR = Path(__file__).parent / "images"
 METADATA_FILE = IMAGES_DIR / "metadata.json"
 ATTRIBUTES_FILE = IMAGES_DIR / "attributes.json"
-OLLAMA_URL = "http://localhost:11434"
-
-# ── Timeouts ───────────────────────────────────────────────────────────────────
-VISION_TIMEOUT = 300   # 5 min per image (vision model is slow)
-EMBED_TIMEOUT  = 30    # 30 sec per embedding (fast model)
-WARMUP_TIMEOUT = 600   # 10 min for initial model load on Mac
-
-
-def warmup_models() -> None:
-    """Pre-load both models into RAM before the main loop.
-
-    Without this, the first real image call silently freezes for several
-    minutes while Ollama loads the vision model — making it look like the
-    script is broken.
-    """
-    print("── Pre-warming models ────────────────────────────────────────────────")
-
-    print("  [1/2] Loading llama3.2-vision into memory...")
-    print("        (first load on Mac can take 3-10 min — this is normal)")
-    try:
-        resp = requests.post(f"{OLLAMA_URL}/api/generate", json={
-            "model": "llama3.2-vision",
-            "prompt": "ready",
-            "stream": False,
-        }, timeout=WARMUP_TIMEOUT)
-        resp.raise_for_status()
-        print("  [1/2] llama3.2-vision ready ✓")
-    except requests.exceptions.Timeout:
-        print("  [1/2] WARNING: vision model warmup timed out after 10 min.")
-        print("        Try running `ollama run llama3.2-vision` in a separate")
-        print("        terminal first to pre-load it, then re-run this script.")
-        raise SystemExit(1)
-    except Exception as e:
-        print(f"  [1/2] ERROR: could not reach Ollama — is it running? ({e})")
-        raise SystemExit(1)
-
-    print("  [2/2] Loading mxbai-embed-large into memory...")
-    try:
-        resp = requests.post(f"{OLLAMA_URL}/api/embeddings", json={
-            "model": "mxbai-embed-large",
-            "prompt": "ready",
-        }, timeout=EMBED_TIMEOUT)
-        resp.raise_for_status()
-        print("  [2/2] mxbai-embed-large ready ✓")
-    except Exception as e:
-        print(f"  [2/2] ERROR: could not load embed model ({e})")
-        raise SystemExit(1)
-
-    print("─────────────────────────────────────────────────────────────────────\n")
+EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def extract_attributes(image_path: Path, category: str) -> dict:
-    """Call llama3.2-vision to extract structured visual attributes from an image.
+    """Extract visual attributes using SV inference server (Qwen2.5-VL-72B).
 
     Args:
-        image_path: Path to the local image file.
-        category: Product category hint (e.g. "shoe", "vegetable", "seafood").
+        image_path (Path): Local path to the product image.
+        category (str): Product category hint (e.g. "shoe", "vegetable").
 
     Returns:
-        Parsed dict of visual attributes.
+        dict: Parsed visual attributes with keys: item_name, brand,
+              color_primary, color_secondary, material, style, occasion.
     """
     with open(image_path, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode()
@@ -78,34 +31,37 @@ def extract_attributes(image_path: Path, category: str) -> dict:
         "Only return valid JSON. No explanation."
     )
 
-    resp = requests.post(f"{OLLAMA_URL}/api/generate", json={
-        "model": "llama3.2-vision",
-        "prompt": prompt,
-        "images": [img_b64],
-        "stream": False,
-        "format": "json",
-    }, timeout=VISION_TIMEOUT)
-    resp.raise_for_status()
-    import pdb;pdb.set_trace()
-    raw = resp.json()["response"]
-    return json.loads(raw) if isinstance(raw, str) else raw
+    response = sv_openai_completion(
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+            ],
+        }],
+        max_tokens=500,
+    )
+
+    raw = response.choices[0].message.content.strip()
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rsplit("```", 1)[0].strip()
+    return json.loads(raw)
 
 
 def embed_text(text: str) -> list:
-    """Embed text using mxbai-embed-large via Ollama.
+    """Embed text using sentence-transformers via SV Ray cluster.
 
     Args:
         text: The text string to embed.
 
     Returns:
-        1024-dim embedding as a list of floats.
+        Embedding as a list of floats.
     """
-    resp = requests.post(f"{OLLAMA_URL}/api/embeddings", json={
-        "model": "mxbai-embed-large",
-        "prompt": text,
-    }, timeout=EMBED_TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()["embedding"]
+    return sv_embed_text([text], model_name=EMBED_MODEL)[0]
 
 
 def build_corpus(meta: dict, attrs: dict) -> str:
@@ -115,7 +71,7 @@ def build_corpus(meta: dict, attrs: dict) -> str:
 
     Args:
         meta: Metadata dict (brand, product, category, color).
-        attrs: Extracted visual attributes dict from llama3.2-vision.
+        attrs: Extracted visual attributes dict from Qwen2.5-VL-72B.
 
     Returns:
         Single space-joined text string ready for embedding.
@@ -139,9 +95,6 @@ def build_corpus(meta: dict, attrs: dict) -> str:
 # ── Main ───────────────────────────────────────────────────────────────────────
 with open(METADATA_FILE) as f:
     items = json.load(f)
-
-# Pre-load both models before the loop so there's no silent freeze mid-run
-warmup_models()
 
 results = []
 total = len([i for i in items if (IMAGES_DIR / f"{i['id']}.jpg").exists()])
@@ -171,7 +124,7 @@ for idx, item in enumerate(items, 1):
             "embedding": embedding,
         })
         print(f"         └─ OK: {corpus}")
-    except requests.exceptions.Timeout:
+    except TimeoutError:
         print(f"         └─ FAIL: timed out — skipping {item['id']}")
     except Exception as e:
         print(f"         └─ FAIL: {e}")
