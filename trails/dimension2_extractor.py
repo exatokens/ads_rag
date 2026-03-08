@@ -1,5 +1,4 @@
 import json
-import base64
 from pathlib import Path
 from ray_cluster_access.sv_inference_api import sv_openai_completion
 from ray_cluster_access.sv_ray_cluster_api import embed_text as sv_embed_text
@@ -9,47 +8,46 @@ ATTRIBUTES_FILE = IMAGES_DIR / "attributes.json"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def extract_attributes(image_path: Path, category: str) -> dict:
-    """Extract visual attributes using SV inference server (Qwen2.5-VL-72B).
+def extract_attributes(image_path: Path, category: str, meta: dict = None) -> dict:
+    """Extract visual attributes using SV inference server (text-only, Qwen3.5-27B).
 
     Args:
-        image_path (Path): Local path to the product image.
+        image_path (Path): Local path to the product image (unused for text model).
         category (str): Product category hint (e.g. "shoe", "vegetable").
+        meta (dict): Metadata dict with brand, product, color, etc.
 
     Returns:
         dict: Parsed visual attributes with keys: item_name, brand,
               color_primary, color_secondary, material, style, occasion.
     """
-    with open(image_path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode()
-
+    meta = meta or {}
     prompt = (
-        f"This is a product image. Category: {category}. "
-        "Return a JSON object with these fields: "
-        "item_name, brand (or 'unknown'), color_primary, color_secondary (or 'none'), "
-        "material (or 'none'), style, occasion. "
-        "Only return valid JSON. No explanation."
+        f"Product info:\n"
+        f"  category: {category}\n"
+        f"  brand: {meta.get('brand', 'unknown')}\n"
+        f"  product: {meta.get('product', '')}\n"
+        f"  color: {meta.get('color', '')}\n\n"
+        f"Return ONLY a JSON object with these fields and no other text: "
+        f"item_name, brand (or 'unknown'), color_primary, color_secondary (or 'none'), "
+        f"material (or 'none'), style, occasion."
     )
 
     response = sv_openai_completion(
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
-            ],
-        }],
-        max_tokens=500,
+        messages=[
+            {"role": "system", "content": "You are a product cataloger. Output only valid JSON. No explanation."},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=300,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
     raw = response.choices[0].message.content.strip()
-    # Strip markdown code fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```", 2)[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.rsplit("```", 1)[0].strip()
-    return json.loads(raw)
+    # Extract JSON from anywhere in the response (handles thinking-model preamble)
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError(f"No JSON object found in response: {raw[:200]}")
+    return json.loads(raw[start:end])
 
 
 def embed_text(text: str) -> list:
@@ -109,9 +107,10 @@ for idx, item in enumerate(items, 1):
         continue
 
     print(f"  [{idx}/{total}] {item['id']} — {meta['brand']} {meta['product']}")
+    
     try:
         print(f"         └─ extracting attributes...")
-        attrs = extract_attributes(image_path, meta["category"])
+        attrs = extract_attributes(image_path, meta["category"], meta)
 
         print(f"         └─ building corpus + embedding...")
         corpus = build_corpus(meta, attrs)

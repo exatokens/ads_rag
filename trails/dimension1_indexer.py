@@ -11,7 +11,7 @@ IMAGES_DIR = Path(__file__).parent / "images"
 METADATA_FILE = IMAGES_DIR / "metadata.json"
 ATTRIBUTES_FILE = IMAGES_DIR / "attributes.json"
 CLIP_DIM = 512
-UNIFIED_DIM = 1024
+UNIFIED_DIM = 384
 
 # ── Load CLIP ──────────────────────────────────────────────────────────────────
 model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
@@ -31,7 +31,7 @@ else:
     print("WARNING: attributes.json not found — run dimension2_extractor.py first.")
 
 # ── Qdrant setup ───────────────────────────────────────────────────────────────
-client = QdrantClient(url="http://localhost:6333")
+client = QdrantClient(url="http://10.0.10.58:6333")
 
 try:
     client.delete_collection("deals")
@@ -67,6 +67,8 @@ for idx, item in enumerate(IMAGES):
         inputs = processor(images=image, return_tensors="pt")
         with torch.no_grad():
             clip_vec = model.get_image_features(**inputs)
+            if not isinstance(clip_vec, torch.Tensor):
+                clip_vec = clip_vec.pooler_output
             clip_vec = clip_vec / clip_vec.norm(dim=-1, keepdim=True)
 
         client.upsert(
