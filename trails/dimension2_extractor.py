@@ -76,6 +76,8 @@ def build_corpus(meta: dict, attrs: dict) -> str:
     """
     skip = {"none", "unknown", "n/a", ""}
     brand = meta["brand"] if meta["brand"].lower() not in skip else ""
+    style = attrs.get("style", "")
+    occasion = attrs.get("occasion", "")
     parts = [
         brand, brand,                          # repeated for weight
         meta["product"], meta["product"],      # repeated for weight
@@ -84,8 +86,8 @@ def build_corpus(meta: dict, attrs: dict) -> str:
         attrs.get("color_primary", ""),
         attrs.get("color_secondary", ""),
         attrs.get("material", ""),
-        attrs.get("style", ""),
-        attrs.get("occasion", ""),
+        style, style,                          # repeated for weight
+        occasion, occasion,                    # repeated for weight
     ]
     return " ".join(p for p in parts if p.lower() not in skip)
 

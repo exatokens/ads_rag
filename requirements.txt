@@ -6,3 +6,12 @@ beautifulsoup4
 lxml
 ddgs
 ollama
+openai
+litellm>=1.81.9
+torch>=2.0.0
+transformers>=4.40.0
+Pillow>=10.0.0
+qdrant-client>=1.9.0
+requests
+python-dotenv
+svlearn-bootcamp>=0.1.7
