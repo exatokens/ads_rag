@@ -1,11 +1,15 @@
 """Query the Qdrant 'deals' collection using natural language."""
 import sys
+import torch
+from transformers import CLIPModel, CLIPProcessor
 from qdrant_client import QdrantClient
-from ray_cluster_access.sv_ray_cluster_api import embed_text as sv_embed_text
 from ray_cluster_access.sv_inference_api import sv_openai_completion
 
-EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 TOP_K = 3
+
+_clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+_clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+_clip_model.eval()
 
 
 def expand_query(query: str) -> str:
@@ -27,7 +31,11 @@ def expand_query(query: str) -> str:
 
 
 def embed_query(text: str) -> list:
-    return sv_embed_text([text], model_name=EMBED_MODEL)[0]
+    inputs = _clip_processor(text=[text], return_tensors="pt", padding=True, truncation=True)
+    with torch.no_grad():
+        features = _clip_model.get_text_features(**inputs)
+        features = features / features.norm(dim=-1, keepdim=True)
+    return features[0].numpy().tolist()
 
 
 def search(query: str, top_k: int = TOP_K):
@@ -38,7 +46,7 @@ def search(query: str, top_k: int = TOP_K):
     hits = client.query_points(
         collection_name="deals",
         query=vec,
-        using="unified_embedding",
+        using="clip_embedding",
         limit=top_k,
         with_payload=True,
     ).points

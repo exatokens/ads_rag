@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
-from ray_cluster_access.sv_inference_api import sv_openai_completion
+from ray_cluster_access.sv_inference_api import sv_openai_completion, _convert_image_to_base64
+
 from ray_cluster_access.sv_ray_cluster_api import embed_text as sv_embed_text
 IMAGES_DIR = Path(__file__).parent / "images"
 METADATA_FILE = IMAGES_DIR / "metadata.json"
@@ -9,10 +10,10 @@ EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def extract_attributes(image_path: Path, category: str, meta: dict = None) -> dict:
-    """Extract visual attributes using SV inference server (text-only, Qwen3.5-27B).
+    """Extract visual attributes using Qwen3.5-27B vision model on the SV inference server.
 
     Args:
-        image_path (Path): Local path to the product image (unused for text model).
+        image_path (Path): Local path to the product image.
         category (str): Product category hint (e.g. "shoe", "vegetable").
         meta (dict): Metadata dict with brand, product, color, etc.
 
@@ -22,20 +23,29 @@ def extract_attributes(image_path: Path, category: str, meta: dict = None) -> di
     """
     meta = meta or {}
     prompt = (
-        f"Product info:\n"
-        f"  category: {category}\n"
-        f"  brand: {meta.get('brand', 'unknown')}\n"
-        f"  product: {meta.get('product', '')}\n"
-        f"  color: {meta.get('color', '')}\n\n"
+        f"Look at this product image carefully.\n"
+        f"Known metadata — category: {category}, brand: {meta.get('brand', 'unknown')}, "
+        f"product: {meta.get('product', '')}, color: {meta.get('color', '')}.\n\n"
         f"Return ONLY a JSON object with these fields and no other text: "
         f"item_name, brand (or 'unknown'), color_primary, color_secondary (or 'none'), "
         f"material (or 'none'), style, occasion."
     )
 
+    image_b64 = _convert_image_to_base64(str(image_path))
+
     response = sv_openai_completion(
         messages=[
             {"role": "system", "content": "You are a product cataloger. Output only valid JSON. No explanation."},
-            {"role": "user", "content": prompt},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            },
         ],
         max_tokens=300,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
@@ -69,7 +79,7 @@ def build_corpus(meta: dict, attrs: dict) -> str:
 
     Args:
         meta: Metadata dict (brand, product, category, color).
-        attrs: Extracted visual attributes dict from Qwen2.5-VL-72B.
+        attrs: Extracted visual attributes dict from Qwen3.5-27B.
 
     Returns:
         Single space-joined text string ready for embedding.
